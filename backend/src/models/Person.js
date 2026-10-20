@@ -22,6 +22,11 @@ const personSchema = new mongoose.Schema(
         faceId: {
             type: String,
             default: null
+        },
+
+        profileImage: {
+            type: String,
+            default: null
         }
     },
     {

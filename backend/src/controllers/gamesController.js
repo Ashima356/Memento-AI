@@ -6,7 +6,7 @@ const Memory = require("../models/Memory");
 const getGamesData = async (req, res) => {
     try {
         const people = await Person.find()
-            .select("name relationship notes")
+            .select("name relationship notes profileImage")
             .lean();
 
         const memories = await Memory.find()
@@ -36,6 +36,7 @@ const getGamesData = async (req, res) => {
             name: person.name,
             relationship: person.relationship,
             notes: person.notes ?? "",
+            profileImage: person.profileImage ?? null,
             memories: memoriesByPerson.get(
                 person._id.toString()
             ) ?? [],

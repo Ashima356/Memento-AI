@@ -1,5 +1,7 @@
 
 const express = require("express");
+const path = require("path");
+
 const personRoutes = require("./routes/personRoutes");
 const memoryRoutes = require("./routes/memoryRoutes");
 const gamesRoutes = require("./routes/gamesRoutes");
@@ -8,6 +10,11 @@ const app = express();
 
 // Middleware
 app.use(express.json());
+
+// Serve static images from backend/public
+app.use(
+    express.static(path.join(__dirname, "..", "public"))
+);
 
 // Health check
 app.get("/", (req, res) => {
