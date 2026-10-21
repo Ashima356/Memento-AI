@@ -6,11 +6,11 @@ embedder = FaceEmbedder()
 
 
 embedding1 = embedder.get_embedding(
-    "ai/face-recognition/test_images/person4.jpeg"
+    r"C:\Users\hp\Downloads\WhatsApp Image 2026-10-22 at 00.02.21.jpeg"
 )
 
 embedding2 = embedder.get_embedding(
-    "ai/face-recognition/test_images/person5_b.jpg"
+    r"C:\Users\hp\Downloads\WhatsApp Image 2026-10-22 at 00.02.55.jpeg"
 )
 
 
