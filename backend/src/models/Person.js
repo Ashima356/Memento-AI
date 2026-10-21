@@ -24,6 +24,11 @@ const personSchema = new mongoose.Schema(
             default: null
         },
 
+        faceEmbedding: {
+            type: [Number],
+            default: undefined
+        },
+
         profileImage: {
             type: String,
             default: null
