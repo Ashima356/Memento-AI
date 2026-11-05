@@ -1,15 +1,18 @@
-
 const Person = require("../models/Person");
 const Memory = require("../models/Memory");
 
 // GET /api/games/data
 const getGamesData = async (req, res) => {
     try {
-        const people = await Person.find()
+        const userId = req.user.userId;
+
+        // Fetch only the logged-in user's people
+        const people = await Person.find({ userId })
             .select("name relationship notes profileImage")
             .lean();
 
-        const memories = await Memory.find()
+        // Fetch only the logged-in user's memories
+        const memories = await Memory.find({ userId })
             .select("personId title description date tags")
             .lean();
 
@@ -46,6 +49,7 @@ const getGamesData = async (req, res) => {
             count: result.length,
             people: result,
         });
+
     } catch (error) {
         console.error("Games data error:", error.message);
 

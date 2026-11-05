@@ -8,6 +8,12 @@ const personSchema = new mongoose.Schema(
             trim: true
         },
 
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: true
+        },
+
         relationship: {
             type: String,
             required: true,

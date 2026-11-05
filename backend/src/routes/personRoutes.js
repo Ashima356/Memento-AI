@@ -8,7 +8,12 @@ const {
     deletePerson
 } = require("../controllers/personController");
 
+const protect = require("../middleware/authMiddleware");
+
 const router = express.Router();
+
+// Protect all person routes
+router.use(protect);
 
 // /api/persons
 router.post("/", createPerson);

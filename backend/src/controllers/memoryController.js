@@ -8,15 +8,26 @@ const generateRagAnswer = require("../services/generateRagAnswer");
 // Create a memory and generate its embedding
 const createMemory = async (req, res) => {
     try {
-        const { personId, title, description } = req.body;
+        const { personId, title, description, date, tags } = req.body;
+        const userId = req.user.userId;
 
-        if (!personId || !title || !description) {
+        if (
+            !personId ||
+            typeof title !== "string" ||
+            !title.trim() ||
+            typeof description !== "string" ||
+            !description.trim()
+        ) {
             return res.status(400).json({
                 message: "personId, title, and description are required."
             });
         }
 
-        const person = await Person.findById(personId);
+        // Verify that the person belongs to the logged-in user
+        const person = await Person.findOne({
+            _id: personId,
+            userId
+        });
 
         if (!person) {
             return res.status(404).json({
@@ -24,34 +35,45 @@ const createMemory = async (req, res) => {
             });
         }
 
-        // Generate an embedding from the title and description
         const text = `${title.trim()}\n${description.trim()}`;
         const embedding = await generateEmbedding(text);
 
-        // Save the memory and its embedding in MongoDB
         const memory = await Memory.create({
-            ...req.body,
+            personId,
+            userId,
+            title: title.trim(),
+            description: description.trim(),
+            date,
+            tags,
             embedding
         });
 
-        return res.status(201).json(memory);
+        // Exclude embedding from the API response
+        const memoryResponse = memory.toObject();
+        delete memoryResponse.embedding;
+
+        return res.status(201).json(memoryResponse);
+
     } catch (error) {
         console.error("Create memory error:", error.message);
 
         return res.status(500).json({
-            message: "Failed to create memory.",
-            error: error.message
+            message: "Failed to create memory."
         });
     }
 };
 
-// Get all memories
+// Get all memories belonging to the logged-in user
 const getMemories = async (req, res) => {
     try {
-        const memories = await Memory.find()
+        const memories = await Memory.find({
+            userId: req.user.userId
+        })
+            .select("-embedding")
             .populate("personId", "name relationship");
 
         return res.status(200).json(memories);
+
     } catch (error) {
         return res.status(500).json({
             message: error.message
@@ -62,7 +84,11 @@ const getMemories = async (req, res) => {
 // Get one memory
 const getMemory = async (req, res) => {
     try {
-        const memory = await Memory.findById(req.params.id)
+        const memory = await Memory.findOne({
+            _id: req.params.id,
+            userId: req.user.userId
+        })
+            .select("-embedding")
             .populate("personId", "name relationship");
 
         if (!memory) {
@@ -72,6 +98,7 @@ const getMemory = async (req, res) => {
         }
 
         return res.status(200).json(memory);
+
     } catch (error) {
         return res.status(400).json({
             message: "Invalid memory ID"
@@ -80,10 +107,12 @@ const getMemory = async (req, res) => {
 };
 
 // Update a memory
-
 const updateMemory = async (req, res) => {
     try {
-        const existingMemory = await Memory.findById(req.params.id);
+        const existingMemory = await Memory.findOne({
+            _id: req.params.id,
+            userId: req.user.userId
+        });
 
         if (!existingMemory) {
             return res.status(404).json({
@@ -91,35 +120,78 @@ const updateMemory = async (req, res) => {
             });
         }
 
-        const { title, description } = req.body;
+        const { title, description, date, tags, personId } = req.body;
 
-        // Regenerate the embedding if the title or description changes
-        if (title !== undefined || description !== undefined) {
-            const updatedTitle = title ?? existingMemory.title;
-            const updatedDescription =
-                description ?? existingMemory.description;
+        // If changing the associated person, verify ownership
+        if (personId !== undefined) {
+            const person = await Person.findOne({
+                _id: personId,
+                userId: req.user.userId
+            });
 
-            const text = `${updatedTitle.trim()}\n${updatedDescription.trim()}`;
+            if (!person) {
+                return res.status(404).json({
+                    message: "Person not found"
+                });
+            }
 
-            req.body.embedding = await generateEmbedding(text);
+            existingMemory.personId = personId;
         }
 
-        const memory = await Memory.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            {
-                new: true,
-                runValidators: true
+        if (title !== undefined) {
+            if (typeof title !== "string" || !title.trim()) {
+                return res.status(400).json({
+                    message: "Title must be a non-empty string."
+                });
             }
-        ).populate("personId", "name relationship");
 
-        return res.status(200).json(memory);
+            existingMemory.title = title.trim();
+        }
+
+        if (description !== undefined) {
+            if (
+                typeof description !== "string" ||
+                !description.trim()
+            ) {
+                return res.status(400).json({
+                    message: "Description must be a non-empty string."
+                });
+            }
+
+            existingMemory.description = description.trim();
+        }
+
+        if (date !== undefined) {
+            existingMemory.date = date;
+        }
+
+        if (tags !== undefined) {
+            existingMemory.tags = tags;
+        }
+
+        // Regenerate embedding if title or description changes
+        if (title !== undefined || description !== undefined) {
+            const text =
+                `${existingMemory.title.trim()}\n${existingMemory.description.trim()}`;
+
+            existingMemory.embedding = await generateEmbedding(text);
+        }
+
+        await existingMemory.save();
+
+        await existingMemory.populate("personId", "name relationship");
+
+        // Exclude embedding from the API response
+        const memoryResponse = existingMemory.toObject();
+        delete memoryResponse.embedding;
+
+        return res.status(200).json(memoryResponse);
+
     } catch (error) {
         console.error("Update memory error:", error.message);
 
         return res.status(500).json({
-            message: "Failed to update memory.",
-            error: error.message
+            message: "Failed to update memory."
         });
     }
 };
@@ -127,7 +199,10 @@ const updateMemory = async (req, res) => {
 // Delete a memory
 const deleteMemory = async (req, res) => {
     try {
-        const memory = await Memory.findByIdAndDelete(req.params.id);
+        const memory = await Memory.findOneAndDelete({
+            _id: req.params.id,
+            userId: req.user.userId
+        });
 
         if (!memory) {
             return res.status(404).json({
@@ -138,6 +213,7 @@ const deleteMemory = async (req, res) => {
         return res.status(200).json({
             message: "Memory deleted successfully"
         });
+
     } catch (error) {
         return res.status(400).json({
             message: "Invalid memory ID"
@@ -145,7 +221,7 @@ const deleteMemory = async (req, res) => {
     }
 };
 
-
+// Semantic memory search
 const searchMemoryController = async (req, res) => {
     try {
         const { query, limit } = req.body;
@@ -170,7 +246,8 @@ const searchMemoryController = async (req, res) => {
 
         const results = await searchMemories(
             query.trim(),
-            parsedLimit
+            parsedLimit,
+            req.user.userId
         );
 
         return res.status(200).json({
@@ -178,6 +255,7 @@ const searchMemoryController = async (req, res) => {
             count: results.length,
             results
         });
+
     } catch (error) {
         console.error("Memory search error:", error.message);
 
@@ -187,15 +265,14 @@ const searchMemoryController = async (req, res) => {
     }
 };
 
-
-
+// Gemini-powered RAG question answering
 async function askMemoryController(req, res) {
     try {
         const { query, limit = 5 } = req.body;
 
         if (typeof query !== "string" || !query.trim()) {
             return res.status(400).json({
-                message: "A non-empty query is required.",
+                message: "A non-empty query is required."
             });
         }
 
@@ -207,26 +284,26 @@ async function askMemoryController(req, res) {
             parsedLimit > 10
         ) {
             return res.status(400).json({
-                message: "Limit must be an integer between 1 and 10.",
+                message: "Limit must be an integer between 1 and 10."
             });
         }
 
         const normalizedQuery = query.trim();
 
-        // Retrieve memories that pass the configured similarity threshold.
+        // Retrieve only this user's relevant memories
         const memories = await searchMemories(
             normalizedQuery,
-            parsedLimit
+            parsedLimit,
+            req.user.userId
         );
 
-        // Avoid calling Gemini when retrieval finds no relevant memories.
         if (memories.length === 0) {
             return res.status(200).json({
                 query: normalizedQuery,
                 answer:
                     "I couldn't find a relevant memory to answer that question. You may need to add more details.",
                 memories_used: 0,
-                sources: [],
+                sources: []
             });
         }
 
@@ -243,22 +320,19 @@ async function askMemoryController(req, res) {
                 id: memory._id,
                 title: memory.title,
                 person: memory.person,
-                similarity: memory.similarity,
-            })),
+                similarity: memory.similarity
+            }))
         });
+
     } catch (error) {
-        // Detailed diagnostics stay in the backend logs.
         console.error("Ask memory error:", error.message);
 
         return res.status(502).json({
             message:
-                "Unable to generate an answer from memories. Please try again later.",
+                "Unable to generate an answer from memories. Please try again later."
         });
     }
 }
-
-
-
 
 module.exports = {
     createMemory,
@@ -267,5 +341,5 @@ module.exports = {
     updateMemory,
     deleteMemory,
     searchMemoryController,
-    askMemoryController,
+    askMemoryController
 };

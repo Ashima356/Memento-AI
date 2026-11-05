@@ -1,4 +1,3 @@
-
 const Memory = require("../../models/Memory");
 const generateEmbedding = require("../embeddings/generateEmbedding");
 
@@ -29,10 +28,16 @@ function cosineSimilarity(a, b) {
     return score;
 }
 
-async function searchMemories(query, limit = 5) {
+async function searchMemories(query, limit = 5, userId) {
+    if (!userId) {
+        throw new Error("User ID is required for memory search.");
+    }
+
     const queryEmbedding = await generateEmbedding(query);
 
+    // Retrieve only memories belonging to the authenticated user.
     const memories = await Memory.find({
+        userId,
         embedding: { $size: 384 },
     }).populate("personId", "name relationship");
 
@@ -44,7 +49,6 @@ async function searchMemories(query, limit = 5) {
                 memory.embedding
             ),
         }))
-        // Discard weak matches before ranking and limiting.
         .filter(({ score }) => score >= MIN_SIMILARITY)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);

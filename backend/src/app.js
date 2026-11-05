@@ -5,6 +5,7 @@ const path = require("path");
 const personRoutes = require("./routes/personRoutes");
 const memoryRoutes = require("./routes/memoryRoutes");
 const gamesRoutes = require("./routes/gamesRoutes");
+const authRoutes = require("./routes/authRoutes");
 
 const app = express();
 
@@ -31,5 +32,7 @@ app.use("/api/memories", memoryRoutes);
 
 // Games routes
 app.use("/api/games", gamesRoutes);
+
+app.use("/api/auth", authRoutes);
 
 module.exports = app;
