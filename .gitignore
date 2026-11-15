@@ -141,16 +141,22 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
-# Python virtual environment
+# Python virtual environments
 .venv/
+venv/
+env/
 
-# Python cache
+# Python cache and compiled files
 __pycache__/
-*.pyc
+*.py[cod]
 
-# Environment variables
+# Environment and local secrets
 .env
+.env.*
+!.env.example
 
-# Local face data
+# Local face recognition data
 registered_faces/
 test_images/
+ai/face-recognition/test-images/
+
