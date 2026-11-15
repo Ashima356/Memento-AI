@@ -141,6 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+<<<<<<< HEAD
 # Python virtual environment
 .venv/
 
@@ -154,3 +155,19 @@ __pycache__/
 # Local face data
 registered_faces/
 test_images/
+=======
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+>>>>>>> origin/feature/backend
