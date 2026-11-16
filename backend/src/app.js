@@ -1,4 +1,3 @@
-
 const express = require("express");
 const path = require("path");
 
@@ -6,6 +5,7 @@ const personRoutes = require("./routes/personRoutes");
 const memoryRoutes = require("./routes/memoryRoutes");
 const gamesRoutes = require("./routes/gamesRoutes");
 const authRoutes = require("./routes/authRoutes");
+const faceRoutes = require("./routes/faceRoutes");
 
 const app = express();
 
@@ -33,6 +33,10 @@ app.use("/api/memories", memoryRoutes);
 // Games routes
 app.use("/api/games", gamesRoutes);
 
+// Authentication routes
 app.use("/api/auth", authRoutes);
+
+// Face Recognition routes
+app.use("/api/faces", faceRoutes);
 
 module.exports = app;
