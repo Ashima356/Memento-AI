@@ -1,56 +1,62 @@
+const mongoose = require("mongoose");
 
+const Patient = require("../models/Patient");
 const Person = require("../models/Person");
 const Memory = require("../models/Memory");
 
-// GET /api/games/data
+// Get patient-specific data for memory games
 const getGamesData = async (req, res) => {
     try {
-        const people = await Person.find()
-            .select("name relationship notes profileImage")
-            .lean();
+        const { patientId } = req.query;
+        const userId = req.user.userId;
 
-        const memories = await Memory.find()
-            .select("personId title description date tags")
-            .lean();
-
-        const memoriesByPerson = new Map();
-
-        for (const memory of memories) {
-            const personId = memory.personId.toString();
-
-            if (!memoriesByPerson.has(personId)) {
-                memoriesByPerson.set(personId, []);
-            }
-
-            memoriesByPerson.get(personId).push({
-                id: memory._id,
-                title: memory.title,
-                description: memory.description,
-                date: memory.date ?? null,
-                tags: memory.tags ?? [],
+        // Validate patient ID
+        if (!mongoose.isValidObjectId(patientId)) {
+            return res.status(400).json({
+                message: "Invalid patient ID.",
             });
         }
 
-        const result = people.map((person) => ({
-            id: person._id,
-            name: person.name,
-            relationship: person.relationship,
-            notes: person.notes ?? "",
-            profileImage: person.profileImage ?? null,
-            memories: memoriesByPerson.get(
-                person._id.toString()
-            ) ?? [],
+        // Verify caregiver owns this patient
+        const patient = await Patient.findOne({
+            _id: patientId,
+            caregiverId: userId,
+        });
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Patient not found.",
+            });
+        }
+
+        // Fetch patient-specific people and memories
+        const persons = await Person.find({
+            userId,
+            patientId,
+        }).lean();
+
+        const memories = await Memory.find({
+            userId,
+            patientId,
+        }).lean();
+
+        // Attach related memories to each person
+        const gamesData = persons.map((person) => ({
+            ...person,
+            memories: memories.filter((memory) =>
+                memory.personId?.toString() === person._id.toString()
+            ),
         }));
 
         return res.status(200).json({
-            count: result.length,
-            people: result,
+            patientId,
+            persons: gamesData,
         });
     } catch (error) {
-        console.error("Games data error:", error.message);
+        console.error("Get games data error:", error);
 
         return res.status(500).json({
-            message: "Failed to retrieve games data.",
+            message: "Failed to fetch games data.",
         });
     }
 };

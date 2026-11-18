@@ -1,37 +1,97 @@
+const mongoose = require("mongoose");
 
 const Memory = require("../models/Memory");
 const Person = require("../models/Person");
+const Patient = require("../models/Patient");
+
 const generateEmbedding = require("../services/embeddings/generateEmbedding");
 const searchMemories = require("../services/retrieval/searchMemories");
 const generateRagAnswer = require("../services/generateRagAnswer");
 
-// Create a memory and generate its embedding
+// Verify that the selected patient belongs to the logged-in caregiver.
+async function verifyPatient(patientId, userId) {
+    if (
+        !mongoose.isValidObjectId(patientId) ||
+        !mongoose.isValidObjectId(userId)
+    ) {
+        return null;
+    }
+
+    return Patient.findOne({
+        _id: patientId,
+        caregiverId: userId,
+    });
+}
+
+// Create a memory for a person belonging to the selected patient.
 const createMemory = async (req, res) => {
     try {
-        const { personId, title, description } = req.body;
+        const userId = req.user.userId;
+        const {
+            patientId,
+            personId,
+            title,
+            description,
+            date,
+            tags,
+        } = req.body;
 
-        if (!personId || !title || !description) {
+        if (
+            !patientId ||
+            !personId ||
+            typeof title !== "string" ||
+            !title.trim() ||
+            typeof description !== "string" ||
+            !description.trim()
+        ) {
             return res.status(400).json({
-                message: "personId, title, and description are required."
+                message:
+                    "patientId, personId, title, and description are required.",
             });
         }
 
-        const person = await Person.findById(personId);
+        if (!mongoose.isValidObjectId(personId)) {
+            return res.status(400).json({
+                message: "Invalid personId.",
+            });
+        }
+
+        const patient = await verifyPatient(patientId, userId);
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Patient not found.",
+            });
+        }
+
+        const person = await Person.findOne({
+            _id: personId,
+            userId,
+            patientId,
+        });
 
         if (!person) {
             return res.status(404).json({
-                message: "Person not found"
+                message: "Person not found for this patient.",
             });
         }
 
-        // Generate an embedding from the title and description
-        const text = `${title.trim()}\n${description.trim()}`;
-        const embedding = await generateEmbedding(text);
+        const cleanTitle = title.trim();
+        const cleanDescription = description.trim();
 
-        // Save the memory and its embedding in MongoDB
+        const embedding = await generateEmbedding(
+            `${cleanTitle}\n${cleanDescription}`
+        );
+
         const memory = await Memory.create({
-            ...req.body,
-            embedding
+            userId,
+            patientId,
+            personId,
+            title: cleanTitle,
+            description: cleanDescription,
+            date,
+            tags,
+            embedding,
         });
 
         return res.status(201).json(memory);
@@ -40,76 +100,181 @@ const createMemory = async (req, res) => {
 
         return res.status(500).json({
             message: "Failed to create memory.",
-            error: error.message
         });
     }
 };
 
-// Get all memories
+// Get memories belonging only to the selected patient.
 const getMemories = async (req, res) => {
     try {
-        const memories = await Memory.find()
-            .populate("personId", "name relationship");
+        const userId = req.user.userId;
+        const { patientId } = req.query;
+
+        const patient = await verifyPatient(patientId, userId);
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Patient not found.",
+            });
+        }
+
+        const memories = await Memory.find({
+            userId,
+            patientId,
+        }).populate("personId", "name relationship");
 
         return res.status(200).json(memories);
     } catch (error) {
+        console.error("Get memories error:", error.message);
+
         return res.status(500).json({
-            message: error.message
+            message: "Failed to retrieve memories.",
         });
     }
 };
 
-// Get one memory
+// Get one memory belonging to the caregiver.
 const getMemory = async (req, res) => {
     try {
-        const memory = await Memory.findById(req.params.id)
-            .populate("personId", "name relationship");
+        const userId = req.user.userId;
+        const { id } = req.params;
+
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                message: "Invalid memory ID.",
+            });
+        }
+
+        const memory = await Memory.findOne({
+            _id: id,
+            userId,
+        }).populate("personId", "name relationship");
 
         if (!memory) {
             return res.status(404).json({
-                message: "Memory not found"
+                message: "Memory not found.",
+            });
+        }
+
+        const patient = await verifyPatient(
+            memory.patientId,
+            userId
+        );
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Memory not found.",
             });
         }
 
         return res.status(200).json(memory);
     } catch (error) {
-        return res.status(400).json({
-            message: "Invalid memory ID"
+        console.error("Get memory error:", error.message);
+
+        return res.status(500).json({
+            message: "Failed to retrieve memory.",
         });
     }
 };
 
-// Update a memory
-
+// Update a memory without allowing ownership changes.
 const updateMemory = async (req, res) => {
     try {
-        const existingMemory = await Memory.findById(req.params.id);
+        const userId = req.user.userId;
+        const { id } = req.params;
 
-        if (!existingMemory) {
-            return res.status(404).json({
-                message: "Memory not found"
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                message: "Invalid memory ID.",
             });
         }
 
-        const { title, description } = req.body;
+        const existingMemory = await Memory.findOne({
+            _id: id,
+            userId,
+        });
 
-        // Regenerate the embedding if the title or description changes
-        if (title !== undefined || description !== undefined) {
-            const updatedTitle = title ?? existingMemory.title;
-            const updatedDescription =
-                description ?? existingMemory.description;
-
-            const text = `${updatedTitle.trim()}\n${updatedDescription.trim()}`;
-
-            req.body.embedding = await generateEmbedding(text);
+        if (!existingMemory) {
+            return res.status(404).json({
+                message: "Memory not found.",
+            });
         }
 
-        const memory = await Memory.findByIdAndUpdate(
-            req.params.id,
-            req.body,
+        const patient = await verifyPatient(
+            existingMemory.patientId,
+            userId
+        );
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Memory not found.",
+            });
+        }
+
+        const updates = {};
+        const { title, description, date, tags } = req.body;
+
+        if (title !== undefined) {
+            if (
+                typeof title !== "string" ||
+                !title.trim()
+            ) {
+                return res.status(400).json({
+                    message: "Title must be a non-empty string.",
+                });
+            }
+
+            updates.title = title.trim();
+        }
+
+        if (description !== undefined) {
+            if (
+                typeof description !== "string" ||
+                !description.trim()
+            ) {
+                return res.status(400).json({
+                    message:
+                        "Description must be a non-empty string.",
+                });
+            }
+
+            updates.description = description.trim();
+        }
+
+        if (date !== undefined) {
+            updates.date = date;
+        }
+
+        if (tags !== undefined) {
+            updates.tags = tags;
+        }
+
+        if (
+            updates.title !== undefined ||
+            updates.description !== undefined
+        ) {
+            const updatedTitle =
+                updates.title ?? existingMemory.title;
+
+            const updatedDescription =
+                updates.description ??
+                existingMemory.description;
+
+            updates.embedding = await generateEmbedding(
+                `${updatedTitle}\n${updatedDescription}`
+            );
+        }
+
+        const memory = await Memory.findOneAndUpdate(
+            {
+                _id: id,
+                userId,
+                patientId: existingMemory.patientId,
+            },
+            { $set: updates },
             {
                 new: true,
-                runValidators: true
+                runValidators: true,
             }
         ).populate("personId", "name relationship");
 
@@ -119,40 +284,79 @@ const updateMemory = async (req, res) => {
 
         return res.status(500).json({
             message: "Failed to update memory.",
-            error: error.message
         });
     }
 };
 
-// Delete a memory
+// Delete only a memory belonging to this caregiver and patient.
 const deleteMemory = async (req, res) => {
     try {
-        const memory = await Memory.findByIdAndDelete(req.params.id);
+        const userId = req.user.userId;
+        const { id } = req.params;
 
-        if (!memory) {
-            return res.status(404).json({
-                message: "Memory not found"
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                message: "Invalid memory ID.",
             });
         }
 
+        const existingMemory = await Memory.findOne({
+            _id: id,
+            userId,
+        });
+
+        if (!existingMemory) {
+            return res.status(404).json({
+                message: "Memory not found.",
+            });
+        }
+
+        const patient = await verifyPatient(
+            existingMemory.patientId,
+            userId
+        );
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Memory not found.",
+            });
+        }
+
+        await Memory.deleteOne({
+            _id: id,
+            userId,
+            patientId: existingMemory.patientId,
+        });
+
         return res.status(200).json({
-            message: "Memory deleted successfully"
+            message: "Memory deleted successfully.",
         });
     } catch (error) {
-        return res.status(400).json({
-            message: "Invalid memory ID"
+        console.error("Delete memory error:", error.message);
+
+        return res.status(500).json({
+            message: "Failed to delete memory.",
         });
     }
 };
 
-
+// Search only memories of an authorized patient.
 const searchMemoryController = async (req, res) => {
     try {
-        const { query, limit } = req.body;
+        const userId = req.user.userId;
+        const { patientId, query, limit } = req.body;
+
+        const patient = await verifyPatient(patientId, userId);
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Patient not found.",
+            });
+        }
 
         if (typeof query !== "string" || !query.trim()) {
             return res.status(400).json({
-                message: "A non-empty query is required."
+                message: "A non-empty query is required.",
             });
         }
 
@@ -164,34 +368,47 @@ const searchMemoryController = async (req, res) => {
             parsedLimit > 20
         ) {
             return res.status(400).json({
-                message: "Limit must be an integer between 1 and 20."
+                message:
+                    "Limit must be an integer between 1 and 20.",
             });
         }
 
+        const normalizedQuery = query.trim();
+
         const results = await searchMemories(
-            query.trim(),
-            parsedLimit
+            normalizedQuery,
+            parsedLimit,
+            userId,
+            patientId
         );
 
         return res.status(200).json({
-            query: query.trim(),
+            query: normalizedQuery,
             count: results.length,
-            results
+            results,
         });
     } catch (error) {
         console.error("Memory search error:", error.message);
 
         return res.status(500).json({
-            message: "Memory search failed."
+            message: "Memory search failed.",
         });
     }
 };
 
-
-
+// Answer questions using only the selected patient's memories.
 async function askMemoryController(req, res) {
     try {
-        const { query, limit = 5 } = req.body;
+        const userId = req.user.userId;
+        const { patientId, query, limit = 5 } = req.body;
+
+        const patient = await verifyPatient(patientId, userId);
+
+        if (!patient) {
+            return res.status(404).json({
+                message: "Patient not found.",
+            });
+        }
 
         if (typeof query !== "string" || !query.trim()) {
             return res.status(400).json({
@@ -207,19 +424,20 @@ async function askMemoryController(req, res) {
             parsedLimit > 10
         ) {
             return res.status(400).json({
-                message: "Limit must be an integer between 1 and 10.",
+                message:
+                    "Limit must be an integer between 1 and 10.",
             });
         }
 
         const normalizedQuery = query.trim();
 
-        // Retrieve memories that pass the configured similarity threshold.
         const memories = await searchMemories(
             normalizedQuery,
-            parsedLimit
+            parsedLimit,
+            userId,
+            patientId
         );
 
-        // Avoid calling Gemini when retrieval finds no relevant memories.
         if (memories.length === 0) {
             return res.status(200).json({
                 query: normalizedQuery,
@@ -247,7 +465,6 @@ async function askMemoryController(req, res) {
             })),
         });
     } catch (error) {
-        // Detailed diagnostics stay in the backend logs.
         console.error("Ask memory error:", error.message);
 
         return res.status(502).json({
@@ -256,9 +473,6 @@ async function askMemoryController(req, res) {
         });
     }
 }
-
-
-
 
 module.exports = {
     createMemory,

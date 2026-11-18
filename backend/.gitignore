@@ -1,2 +1,4 @@
 node_modules/
 .env
+# Private patient and family photos
+/backend/private/

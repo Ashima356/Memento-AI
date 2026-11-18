@@ -1,8 +1,7 @@
-
+const mongoose = require("mongoose");
 const Memory = require("../../models/Memory");
 const generateEmbedding = require("../embeddings/generateEmbedding");
 
-// Configurable threshold: cosine similarity ranges from -1 to 1.
 const configuredThreshold = Number(
     process.env.MEMORY_SIMILARITY_THRESHOLD
 );
@@ -14,9 +13,14 @@ const MIN_SIMILARITY =
         ? configuredThreshold
         : 0.30;
 
-// Embeddings are normalized, so their dot product gives cosine similarity.
+// Normalized embeddings: dot product = cosine similarity
 function cosineSimilarity(a, b) {
-    if (a.length !== b.length || a.length === 0) {
+    if (
+        !Array.isArray(a) ||
+        !Array.isArray(b) ||
+        a.length !== b.length ||
+        a.length === 0
+    ) {
         return -1;
     }
 
@@ -29,10 +33,20 @@ function cosineSimilarity(a, b) {
     return score;
 }
 
-async function searchMemories(query, limit = 5) {
+async function searchMemories(query, limit = 5, userId, patientId) {
+    // Never allow an unscoped memory search
+    if (
+        !mongoose.isValidObjectId(userId) ||
+        !mongoose.isValidObjectId(patientId)
+    ) {
+        throw new Error("Valid userId and patientId are required.");
+    }
+
     const queryEmbedding = await generateEmbedding(query);
 
     const memories = await Memory.find({
+        userId,
+        patientId,
         embedding: { $size: 384 },
     }).populate("personId", "name relationship");
 
@@ -44,7 +58,6 @@ async function searchMemories(query, limit = 5) {
                 memory.embedding
             ),
         }))
-        // Discard weak matches before ranking and limiting.
         .filter(({ score }) => score >= MIN_SIMILARITY)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);

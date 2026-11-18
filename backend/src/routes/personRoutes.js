@@ -8,13 +8,32 @@ const {
     deletePerson
 } = require("../controllers/personController");
 
+const {
+    uploadPersonImage
+} = require("../controllers/personImageController");
+
+const upload = require("../middleware/uploadMiddleware");
+const uploadErrorHandler = require("../middleware/uploadErrorHandler");
+const protect = require("../middleware/authMiddleware");
+
 const router = express.Router();
 
-// /api/persons
+// Protect all person routes with JWT authentication
+router.use(protect);
+
+// Create and list people
 router.post("/", createPerson);
 router.get("/", getPeople);
 
-// /api/persons/:id
+// Upload a person's profile image
+router.post(
+    "/:id/image",
+    upload,
+    uploadErrorHandler,
+    uploadPersonImage
+);
+
+// Get, update and delete a person
 router.get("/:id", getPerson);
 router.put("/:id", updatePerson);
 router.delete("/:id", deletePerson);
