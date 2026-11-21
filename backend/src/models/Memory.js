@@ -5,13 +5,22 @@ const memorySchema = new mongoose.Schema(
         personId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Person",
-            required: true
+            required: true,
+            index: true
         },
 
         userId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
-            required: true
+            required: true,
+            index: true
+        },
+
+        patientId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Patient",
+            required: true,
+            index: true
         },
 
         title: {
@@ -36,14 +45,23 @@ const memorySchema = new mongoose.Schema(
             default: []
         },
 
+        // Semantic embedding used for memory retrieval.
         embedding: {
             type: [Number],
-            default: []
+            default: [],
+            select: false
         }
     },
     {
         timestamps: true
     }
 );
+
+// Efficient caregiver + patient + person scoped queries.
+memorySchema.index({
+    userId: 1,
+    patientId: 1,
+    personId: 1
+});
 
 module.exports = mongoose.model("Memory", memorySchema);

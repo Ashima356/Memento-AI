@@ -1,7 +1,8 @@
+const mongoose = require("mongoose");
+
 const Memory = require("../../models/Memory");
 const generateEmbedding = require("../embeddings/generateEmbedding");
 
-// Configurable threshold: cosine similarity ranges from -1 to 1.
 const configuredThreshold = Number(
     process.env.MEMORY_SIMILARITY_THRESHOLD
 );
@@ -13,33 +14,72 @@ const MIN_SIMILARITY =
         ? configuredThreshold
         : 0.30;
 
-// Embeddings are normalized, so their dot product gives cosine similarity.
+// Calculate cosine similarity between two vectors.
 function cosineSimilarity(a, b) {
-    if (a.length !== b.length || a.length === 0) {
+    if (
+        !Array.isArray(a) ||
+        !Array.isArray(b) ||
+        a.length !== b.length ||
+        a.length === 0
+    ) {
         return -1;
     }
 
-    let score = 0;
+    let dotProduct = 0;
+    let magnitudeA = 0;
+    let magnitudeB = 0;
 
     for (let i = 0; i < a.length; i++) {
-        score += a[i] * b[i];
+        if (
+            !Number.isFinite(a[i]) ||
+            !Number.isFinite(b[i])
+        ) {
+            return -1;
+        }
+
+        dotProduct += a[i] * b[i];
+        magnitudeA += a[i] * a[i];
+        magnitudeB += b[i] * b[i];
     }
 
-    return score;
+    if (magnitudeA === 0 || magnitudeB === 0) {
+        return -1;
+    }
+
+    return dotProduct / (
+        Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB)
+    );
 }
 
-async function searchMemories(query, limit = 5, userId) {
-    if (!userId) {
-        throw new Error("User ID is required for memory search.");
+// Search memories belonging only to the authenticated
+// caregiver and the selected patient.
+async function searchMemories(query, limit = 5, userId, patientId) {
+    if (
+        !mongoose.isValidObjectId(userId) ||
+        !mongoose.isValidObjectId(patientId)
+    ) {
+        throw new Error(
+            "Valid userId and patientId are required."
+        );
     }
 
-    const queryEmbedding = await generateEmbedding(query);
+    if (
+        typeof query !== "string" ||
+        !query.trim()
+    ) {
+        throw new Error("A valid search query is required.");
+    }
 
-    // Retrieve only memories belonging to the authenticated user.
+    const queryEmbedding = await generateEmbedding(query.trim());
+
     const memories = await Memory.find({
         userId,
+        patientId,
         embedding: { $size: 384 },
-    }).populate("personId", "name relationship");
+    })
+        // Explicitly retrieve embeddings for internal similarity scoring.
+        .select("+embedding")
+        .populate("personId", "name relationship");
 
     const results = memories
         .map((memory) => ({
@@ -53,6 +93,7 @@ async function searchMemories(query, limit = 5, userId) {
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
 
+    // Return memory information, never raw embeddings.
     return results.map(({ memory, score }) => ({
         _id: memory._id,
         title: memory.title,
