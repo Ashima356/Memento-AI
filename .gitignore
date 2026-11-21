@@ -161,3 +161,5 @@ __pycache__/
 
 # Local face-recognition test images (do not commit)
 /ai/face-recognition/test-images/
+
+games/memory_matching/demo_photos/
