@@ -18,7 +18,12 @@ const gameSessionSchema = new mongoose.Schema(
 
         gameType: {
             type: String,
-            enum: ["face-name", "relationship", "memory-recall"],
+            enum: [
+                "face-name",
+                "relationship",
+                "memory-recall",
+                "memory-matching",
+            ],
             required: true,
         },
 
@@ -26,6 +31,7 @@ const gameSessionSchema = new mongoose.Schema(
             type: Number,
             required: true,
             min: 0,
+            max: 100,
         },
 
         totalQuestions: {
@@ -34,6 +40,7 @@ const gameSessionSchema = new mongoose.Schema(
             min: 1,
         },
 
+        // First-attempt correct answers
         correctAnswers: {
             type: Number,
             required: true,
@@ -46,15 +53,44 @@ const gameSessionSchema = new mongoose.Schema(
             default: "easy",
         },
 
+        finalDifficulty: {
+            type: String,
+            enum: ["easy", "medium", "hard"],
+            default: undefined,
+        },
+
         hintsUsed: {
             type: Number,
             default: 0,
             min: 0,
         },
+
+        totalAttempts: {
+            type: Number,
+            min: 0,
+            default: undefined,
+        },
+
+        averageResponseTime: {
+            type: Number,
+            min: 0,
+            default: undefined,
+        },
+
+        completionRate: {
+            type: Number,
+            min: 0,
+            max: 100,
+            default: undefined,
+        },
     },
     { timestamps: true }
 );
 
-gameSessionSchema.index({ userId: 1, patientId: 1, createdAt: -1 });
+gameSessionSchema.index({
+    userId: 1,
+    patientId: 1,
+    createdAt: -1,
+});
 
 module.exports = mongoose.model("GameSession", gameSessionSchema);
