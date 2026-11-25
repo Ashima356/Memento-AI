@@ -1,0 +1,24 @@
+import cv2
+from insightface.app import FaceAnalysis
+
+
+class FaceDetector:
+
+    def __init__(self):
+        self.app = FaceAnalysis(
+            name="buffalo_l",
+            providers=["CPUExecutionProvider"]
+        )
+
+        self.app.prepare(ctx_id=-1)
+
+    def detect(self, image_path):
+
+        image = cv2.imread(image_path)
+
+        if image is None:
+            raise ValueError(f"Could not read image: {image_path}")
+
+        faces = self.app.get(image)
+
+        return image, faces

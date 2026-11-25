@@ -1,0 +1,14 @@
+# Node.js dependencies
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Private patient and family photos
+/private/
+
+# Logs
+*.log
+npm-debug.log*

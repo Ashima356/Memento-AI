@@ -1,0 +1,186 @@
+from typing import Dict, List
+
+import numpy as np
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
+
+from embeddings import FaceEmbedder
+from face_embedding_service import generate_face_embedding
+from matcher import cosine_similarity
+
+
+app = FastAPI(
+    title="Memento-AI Face Recognition API",
+    version="1.0.0",
+)
+
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
+EMBEDDING_DIMENSIONS = 512
+
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+
+# Preserve existing face recognition implementation.
+embedder = FaceEmbedder()
+
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "service": "Memento-AI Face Recognition",
+    }
+
+
+async def read_uploaded_image(image: UploadFile) -> bytes:
+    if image.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Only JPEG, PNG and WebP images are allowed.",
+        )
+
+    image_bytes = await image.read(MAX_IMAGE_SIZE + 1)
+
+    if len(image_bytes) > MAX_IMAGE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail="Image exceeds the 5 MB limit.",
+        )
+
+    if not image_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="Image data is required.",
+        )
+
+    return image_bytes
+
+
+# Existing endpoint used by backend/src/routes/faceRoutes.js
+@app.post("/embed")
+async def generate_embedding(image: UploadFile = File(...)):
+    try:
+        image_bytes = await read_uploaded_image(image)
+
+        embedding = embedder.get_embedding_from_bytes(
+            image_bytes
+        )
+
+        return {
+            "model": "buffalo_l",
+            "embedding": embedding.tolist(),
+            "dimensions": len(embedding),
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    finally:
+        await image.close()
+
+
+# Endpoint used by backend/src/services/generateFaceEmbedding.js
+@app.post("/embeddings")
+async def create_embedding(file: UploadFile = File(...)):
+    try:
+        image_bytes = await read_uploaded_image(file)
+
+        embedding = generate_face_embedding(image_bytes)
+
+        return {
+            "embedding": embedding,
+            "dimensions": len(embedding),
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        )
+
+    finally:
+        await file.close()
+
+
+class FaceMatchRequest(BaseModel):
+    embedding: List[float] = Field(
+        min_length=EMBEDDING_DIMENSIONS,
+        max_length=EMBEDDING_DIMENSIONS,
+    )
+
+    known_faces: Dict[str, List[float]]
+
+    threshold: float = Field(
+        default=0.5,
+        ge=-1.0,
+        le=1.0,
+    )
+
+
+# Existing endpoint used by backend/src/routes/faceRoutes.js
+@app.post("/match")
+def match_face(request: FaceMatchRequest):
+    query = np.asarray(
+        request.embedding,
+        dtype=np.float64,
+    )
+
+    if (
+        not np.all(np.isfinite(query))
+        or np.linalg.norm(query) == 0
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid query embedding",
+        )
+
+    best_person = None
+    best_score = -1.0
+
+    for person_id, known_embedding in request.known_faces.items():
+        if len(known_embedding) != EMBEDDING_DIMENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid embedding dimensions for {person_id}",
+            )
+
+        known = np.asarray(
+            known_embedding,
+            dtype=np.float64,
+        )
+
+        if (
+            not np.all(np.isfinite(known))
+            or np.linalg.norm(known) == 0
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid embedding for {person_id}",
+            )
+
+        score = cosine_similarity(query, known)
+
+        if score > best_score:
+            best_score = score
+            best_person = person_id
+
+    if best_person is None or best_score < request.threshold:
+        return {
+            "matched": False,
+            "person_id": None,
+            "similarity": (
+                None if best_person is None else float(best_score)
+            ),
+        }
+
+    return {
+        "matched": True,
+        "person_id": best_person,
+        "similarity": float(best_score),
+    }
